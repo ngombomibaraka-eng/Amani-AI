@@ -1,6 +1,6 @@
 # 🕊️ AMANI AI - Système de Détection et Prévention des Conflits par Intelligence Artificielle
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/votre-repo/amani-ai)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/ngombomibaraka-eng/amani-ai)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org/downloads/)
 [![Streamlit](https://img.shields.io/badge/streamlit-1.28.0-red.svg)](https://streamlit.io/)
 [![License](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)

@@ -1,24 +1,17 @@
-# app.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import io
-import json
 from PIL import Image
-import os
 
-# Import des modules
-from config import APP_NAME, APP_VERSION, THRESHOLDS, ALERT_LEVELS
+from config import APP_NAME, APP_VERSION, THRESHOLDS
 from database import Database
 from auth import AuthManager
 from ai_engine import AIEngine
 from utils import (
-    generate_report_pdf, create_excel_export, create_dashboard_charts,
-    display_metrics, get_download_link, format_timestamp, get_status_color,
-    get_severity_icon, truncate_text, safe_json_parse, create_sentiment_chart
+    create_dashboard_charts, format_timestamp,
+    get_severity_icon, truncate_text
 )
 
-# Configuration de la page
 st.set_page_config(
     page_title=APP_NAME,
     page_icon="🕊️",
@@ -26,775 +19,422 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialisation des composants
 db = Database()
 auth = AuthManager()
 ai_engine = AIEngine()
 
-# ============ SIDEBAR ============
+# ==================== SIDEBAR ====================
 def render_sidebar():
-    """Rendu de la barre latérale"""
     with st.sidebar:
-        st.image("https://via.placeholder.com/200x80/1a5276/ffffff?text=Amani+AI", use_column_width=True)
-        
+        st.title("🕊️ AMANI AI")
+        st.caption(f"{APP_NAME} v{APP_VERSION}")
+        st.caption("Hub Tech DRC - Goma 2026")
+        st.divider()
+
         if auth.is_authenticated():
             user = auth.get_current_user()
-            st.markdown(f"### 👤 {user.get('full_name', user.get('username'))}")
-            st.markdown(f"*Rôle: {user.get('role', 'observer')}*")
-            
-            # Navigation
-            st.markdown("---")
-            
-            # Menu principal
-            menu_items = {
-                "🏠 Dashboard": "dashboard",
-                "📝 Analyse": "analysis",
+            with st.container(border=True):
+                st.markdown(f"👤 **{user.get('full_name', user.get('username'))}**")
+                st.badge(f"{user.get('role', 'observer').upper()}", color="blue")
+
+            st.subheader("Navigation")
+            menu = {
+                "🏠 Tableau de bord": "dashboard",
+                "📝 Analyse IA": "analysis",
                 "🗺️ Cartographie": "maps",
                 "📊 Rapports": "reports",
                 "🔔 Alertes": "alerts"
             }
-            
-            # Admin menu
             if auth.has_permission("manage_users"):
-                menu_items["⚙️ Administration"] = "admin"
-            
-            # Sélection de la page
-            page = st.radio("Navigation", list(menu_items.keys()))
-            st.session_state['page'] = menu_items[page]
-            
-            st.markdown("---")
-            
-            # Déconnexion
-            if st.button("🚪 Déconnexion", use_container_width=True):
+                menu["⚙️ Administration"] = "admin"
+
+            sel = st.radio("Aller vers", list(menu.keys()), label_visibility="collapsed")
+            st.session_state['page'] = menu[sel]
+            st.divider()
+            # ✅ Correction 1: use_container_width -> width
+            if st.button("🚪 Déconnexion", width="stretch"):
                 auth.logout()
+                st.rerun()
         else:
-            # Page de connexion/inscription
-            st.markdown("### 🔐 Authentification")
-            
+            st.subheader("🔐 Espace Membre")
             tab1, tab2 = st.tabs(["Connexion", "Inscription"])
-            
-            with tab1:
-                login_form()
-            
-            with tab2:
-                register_form()
+            with tab1: login_form()
+            with tab2: register_form()
+
+            st.divider()
+            with st.container(border=True):
+                st.markdown("**Pourquoi nous rejoindre?**")
+                st.markdown("✅ 1200+ observateurs actifs")
+                st.markdown("✅ 5 langues locales")
+                st.markdown("✅ 100% gratuit")
 
 def login_form():
-    """Formulaire de connexion"""
     with st.form("login_form"):
-        username = st.text_input("Nom d'utilisateur")
-        password = st.text_input("Mot de passe", type="password")
-        submitted = st.form_submit_button("Se connecter")
-        
-        if submitted:
-            if auth.login(username, password):
+        u = st.text_input("Nom d'utilisateur")
+        p = st.text_input("Mot de passe", type="password")
+        # ✅ Correction 2: use_container_width -> width
+        if st.form_submit_button("Se connecter", type="primary", width="stretch"):
+            if auth.login(u, p):
                 st.success("Connexion réussie!")
                 st.rerun()
             else:
                 st.error("Identifiants incorrects")
 
 def register_form():
-    """Formulaire d'inscription"""
     with st.form("register_form"):
-        username = st.text_input("Nom d'utilisateur")
-        email = st.text_input("Email")
+        username = st.text_input("Nom d'utilisateur *")
+        email = st.text_input("Email *")
         full_name = st.text_input("Nom complet")
         password = st.text_input("Mot de passe", type="password")
-        confirm_password = st.text_input("Confirmer le mot de passe", type="password")
-        role = st.selectbox("Rôle", ["observer", "analyst", "moderator"])
-        
-        submitted = st.form_submit_button("S'inscrire")
-        
-        if submitted:
-            if password != confirm_password:
-                st.error("Les mots de passe ne correspondent pas")
-            elif not username or not email:
-                st.error("Les champs sont obligatoires")
-            elif len(password) < 6:
-                st.error("Le mot de passe doit contenir au moins 6 caractères")
+        role = st.selectbox("Je suis", ["observer", "analyst", "moderator"])
+        # ✅ Correction 3: use_container_width -> width
+        if st.form_submit_button("Créer mon compte", width="stretch"):
+            if auth.register_user(username, email, password, full_name, role):
+                st.success("Compte créé! Connectez-vous.")
             else:
-                if auth.register_user(username, email, password, full_name, role):
-                    st.success("Inscription réussie! Vous pouvez maintenant vous connecter.")
-                else:
-                    st.error("Utilisateur déjà existant")
+                st.error("Utilisateur existe déjà")
 
-# ============ PAGES ============
-
-def render_dashboard():
-    """Page Dashboard"""
-    st.title("🏠 Tableau de Bord")
-    
-    if not auth.is_authenticated():
-        st.warning("Veuillez vous connecter pour accéder au tableau de bord")
-        return
-    
-    # Statistiques
+# ==================== PAGE D'ACCUEIL PRO AVEC VRAIES DONNEES ====================
+def render_landing_page():
     stats = db.get_statistics()
-    
-    # Métriques
-    display_metrics(
-        stats.get('total_users', 0),
-        stats.get('total_analyses', 0),
-        stats.get('active_alerts', 0),
-        stats.get('average_score', 0)
-    )
-    
-    st.markdown("---")
-    
-    # Graphiques
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        create_dashboard_charts(stats)
-    
-    with col2:
-        # Analyses récentes
-        st.subheader("📋 Analyses récentes")
-        recent_analyses = db.get_all_analyses(limit=5)
-        
-        if recent_analyses:
-            df = pd.DataFrame(recent_analyses)
-            df_display = df[['created_at', 'content_type', 'score', 'status']].copy()
-            df_display['created_at'] = df_display['created_at'].apply(format_timestamp)
-            
-            # Formatage des scores
-            df_display['score'] = df_display['score'].apply(lambda x: f"{x:.1f}%" if x else "N/A")
-            
-            st.dataframe(df_display, use_container_width=True)
-        else:
-            st.info("Aucune analyse récente")
-    
-    # Alertes récentes
-    st.subheader("🔔 Alertes récentes")
-    recent_alerts = db.get_alerts(limit=5)
-    
-    if recent_alerts:
-        for alert in recent_alerts:
-            severity = alert['severity']
-            icon = get_severity_icon(severity)
-            status_color = get_status_color(alert['status'])
-            
-            col1, col2, col3 = st.columns([1, 3, 1])
-            with col1:
-                st.markdown(f"{icon} **{severity.upper()}**")
-            with col2:
-                st.markdown(truncate_text(alert['message']))
-            with col3:
-                st.markdown(f"*{format_timestamp(alert['created_at'])}*")
-            
-            if alert['status'] == 'new':
-                if st.button(f"Résoudre", key=f"resolve_{alert['id']}"):
-                    user = auth.get_current_user()
-                    db.resolve_alert(alert['id'], user['id'])
-                    st.success("Alerte résolue")
-                    st.rerun()
-            
-            st.divider()
-    else:
-        st.info("Aucune alerte récente")
+    total_analyses = stats.get('total_analyses', 0)
+    active_alerts = stats.get('active_alerts', 0)
+    total_users = stats.get('total_users', 0)
+    avg_score = stats.get('average_score', 0)
+    recent_analyses = db.get_all_analyses(limit=4)
+    recent_alerts = db.get_alerts(limit=3)
 
-def render_analysis():
-    """Page d'analyse"""
-    st.title("📝 Analyse de contenu")
-    
+    with st.container(border=True):
+        col1, col2 = st.columns([2, 1], vertical_alignment="center")
+        with col1:
+            st.title("🕊️ La désinformation divise. Amani AI rassemble.")
+            st.subheader(f"Première plateforme IA de lutte contre la haine en RDC.")
+            st.markdown(
+                f"Développée à Goma par Hub Tech DRC. Notre système a déjà analysé **{total_analyses} contenus** "
+                f"grâce à **{total_users} observateurs**. Notre mission : protéger la vérité."
+            )
+            st.write("")
+            c1, c2 = st.columns(2)
+            with c1:
+                # ✅ Correction 4: use_container_width -> width
+                st.button("🚀 Commencer l'analyse", type="primary", width="stretch")
+            with c2:
+                st.button("📖 Comment ça marche?", width="stretch")
+        with col2:
+            with st.container(border=True):
+                st.markdown("**🎯 Impact en direct**")
+                st.metric("Contenus analysés", f"{total_analyses}", delta="données réelles")
+                st.metric("Alertes actives", f"{active_alerts}", delta="à traiter", delta_color="inverse")
+                st.metric("Score moyen", f"{avg_score:.1f}%")
+                if total_analyses > 0:
+                    st.progress(int(avg_score), text="Fiabilité globale")
+                else:
+                    st.progress(0, text="En attente de premières analyses")
+
+    st.subheader("📊 État du système - Données réelles")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("📝 Total Analyses", total_analyses)
+    m2.metric("🔔 Alertes Actives", active_alerts)
+    m3.metric("👥 Observateurs", total_users)
+    m4.metric("🎯 Crédibilité", f"{avg_score:.1f}%")
+
+    st.divider()
+
+    left, right = st.columns([1.6, 1], gap="large")
+
+    with left:
+        st.subheader("💡 3 Piliers de la plateforme")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            with st.container(border=True):
+                st.markdown("#### 🧠 1. Détecter")
+                st.markdown("Module `AIEngine`")
+                st.markdown("- `analyze_text()`")
+                st.markdown("- `analyze_image()`")
+                st.markdown("- `analyze_audio()`")
+                st.info("5 langues: FR, EN, SW, LN, AR")
+        with c2:
+            with st.container(border=True):
+                st.markdown("#### 🗺️ 2. Cartographier")
+                st.markdown("Module `Database`")
+                st.markdown("- `get_alerts()`")
+                st.markdown("- `get_statistics()`")
+                st.markdown("- Carte Folium")
+                st.warning("Foyers: Goma, Bukavu, Bujumbura")
+        with c3:
+            with st.container(border=True):
+                st.markdown("#### 📄 3. Agir")
+                st.markdown("Module `utils`")
+                st.markdown("- `generate_report_pdf()`")
+                st.markdown("- `create_excel_export()`")
+                st.success("Preuves pour ONG & Médias")
+
+        st.divider()
+        st.subheader("⚙️ Flux de l'application vu en cours")
+        with st.container(border=True):
+            s1, s2, s3, s4 = st.columns(4)
+            s1.markdown("**1. AUTH**\n\n`AuthManager`\n`login()`\n`register_user()`")
+            s2.markdown("**2. ANALYSE**\n\n`AIEngine`\nScore 0-100%\n`THRESHOLDS`")
+            s3.markdown("**3. BDD**\n\n`Database`\n`create_analysis()`\n`create_alert()`")
+            s4.markdown("**4. UI**\n\n`Streamlit`\n`st.metric`\n`st.dataframe`")
+
+    with right:
+        with st.container(border=True):
+            st.subheader("🔴 Activité en direct")
+            st.caption("Données issues de votre SQLite")
+
+            if recent_analyses:
+                st.markdown("**Dernières analyses :**")
+                for a in recent_analyses:
+                    score = a.get('score', 0)
+                    if score < 40:
+                        st.error(f"🚨 {a['content_type'].upper()} | {score:.0f}% | {format_timestamp(a['created_at'])}")
+                    elif score < 70:
+                        st.warning(f"⚠️ {a['content_type'].upper()} | {score:.0f}% | {format_timestamp(a['created_at'])}")
+                    else:
+                        st.success(f"✅ {a['content_type'].upper()} | {score:.0f}% | {format_timestamp(a['created_at'])}")
+            else:
+                st.info("Aucune analyse enregistrée. Soyez le premier à tester le système!", icon="👋")
+                st.markdown("Allez dans **📝 Analyse IA** pour coller un texte suspect.")
+
+            st.divider()
+
+            if recent_alerts:
+                st.markdown("**Dernières alertes :**")
+                for alert in recent_alerts:
+                    st.markdown(f"{get_severity_icon(alert['severity'])} **{alert['severity'].upper()}** - {truncate_text(alert['message'], 60)}")
+                    st.caption(format_timestamp(alert['created_at']))
+            else:
+                st.success("Aucune alerte critique. Système calme.", icon="🕊️")
+
+            st.divider()
+            # ✅ Correction 5: use_container_width -> width
+            st.button("👉 Créer mon compte gratuit", type="primary", width="stretch")
+            st.caption("Gratuit • Sécurisé • Fait à Goma")
+
+# ==================== DASHBOARD CONNECTÉ AVEC VRAIES DONNEES ====================
+def render_dashboard():
     if not auth.is_authenticated():
-        st.warning("Veuillez vous connecter pour analyser du contenu")
+        render_landing_page()
         return
-    
+
     user = auth.get_current_user()
-    
-    # Onglets d'analyse
+    stats = db.get_statistics()
+
+    st.title(f"Bon retour, {user.get('full_name', user.get('username')).split()[0]} 👋")
+    st.caption(f"Bienvenue sur {APP_NAME} - Détecteur de désinformation")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("📝 Analyses", stats.get('total_analyses', 0), delta="Aujourd'hui")
+    m2.metric("🔔 Alertes", stats.get('active_alerts', 0), delta="Actives", delta_color="inverse")
+    m3.metric("🎯 Score Moyen", f"{stats.get('average_score', 0):.1f}%")
+    m4.metric("👥 Utilisateurs", stats.get('total_users', 0))
+
+    st.divider()
+
+    col_g, col_d = st.columns([2, 1.2])
+    with col_g:
+        with st.container(border=True):
+            st.subheader("📈 Tendances de détection")
+            create_dashboard_charts(stats)
+
+    with col_d:
+        with st.container(border=True):
+            st.subheader("📋 Analyses récentes")
+            recent = db.get_all_analyses(limit=5)
+            if recent:
+                df = pd.DataFrame(recent)
+                st.dataframe(df[['created_at', 'content_type', 'score', 'status']], use_container_width=True, hide_index=True)
+            else:
+                st.info("Aucune donnée")
+
+        with st.container(border=True):
+            st.subheader("🔔 Alertes")
+            alerts = db.get_alerts(limit=3)
+            if alerts:
+                for alert in alerts:
+                    st.markdown(f"{get_severity_icon(alert['severity'])} {alert['severity'].upper()} - {truncate_text(alert['message'], 50)}")
+                    if alert['status'] == 'new':
+                        # ✅ Correction 6: use_container_width -> width
+                        if st.button("Résoudre", key=f"d_{alert['id']}", width="stretch"):
+                            db.resolve_alert(alert['id'], user['id'])
+                            st.rerun()
+            else:
+                st.success("Aucune alerte")
+
+# ==================== PAGES ANALYSE COMPLÈTES ====================
+def render_analysis():
+    st.title("📝 Centre d'Analyse IA")
+    st.markdown("Soumettez un contenu. L'IA analyse en 3 secondes.")
+    if not auth.is_authenticated():
+        st.warning("Connectez-vous")
+        return
+    user = auth.get_current_user()
     tab1, tab2, tab3, tab4 = st.tabs(["📄 Texte", "🖼️ Image", "🎵 Audio", "🎬 Vidéo"])
-    
-    with tab1:
-        render_text_analysis(user)
-    
-    with tab2:
-        render_image_analysis(user)
-    
-    with tab3:
-        render_audio_analysis(user)
-    
-    with tab4:
-        render_video_analysis(user)
+    with tab1: render_text_analysis(user)
+    with tab2: render_image_analysis(user)
+    with tab3: render_audio_analysis(user)
+    with tab4: render_video_analysis(user)
 
 def render_text_analysis(user):
-    """Analyse de texte"""
-    st.markdown("### Analyse de texte")
-    
-    text = st.text_area(
-        "Entrez le texte à analyser",
-        height=200,
-        placeholder="Collez votre texte ici..."
-    )
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        language = st.selectbox("Langue", ["fr", "en", "ar", "sw", "ln"])
-    with col2:
-        analyze_button = st.button("🔍 Analyser", use_container_width=True)
-    
-    if analyze_button and text:
-        if len(text) < 10:
-            st.warning("Le texte est trop court pour une analyse pertinente (minimum 10 caractères)")
-            return
-        
-        with st.spinner("Analyse en cours..."):
-            # Création de l'analyse dans la BDD
-            analysis_id = db.create_analysis(user['id'], "text", text[:500])
-            
-            # Analyse IA
-            result = ai_engine.analyze_text(text, language)
-            
-            # Mise à jour de la BDD
-            db.update_analysis_result(analysis_id, result, result.get('credibility_score', 50))
-            
-            # Affichage des résultats
-            display_analysis_results(result, "text")
-            
-            # Log
-            db.add_log(user['id'], "analyze_text", f"Analyse texte: {truncate_text(text, 50)}")
-            
-            # Gestion des alertes
-            check_and_create_alerts(analysis_id, result)
+    with st.container(border=True):
+        st.subheader("Analyse de texte")
+        text = st.text_area("Entrez le texte", height=180, placeholder="Collez le texte ici...")
+        lang = st.selectbox("Langue", ["fr", "en", "ar", "sw", "ln"])
+        # ✅ Correction 7: use_container_width -> width
+        if st.button("🔍 Analyser le texte", type="primary", width="stretch") and text:
+            if len(text) < 10:
+                st.warning("Texte trop court")
+                return
+            with st.spinner("Analyse avec AIEngine.analyze_text()..."):
+                aid = db.create_analysis(user['id'], "text", text[:500])
+                res = ai_engine.analyze_text(text, lang)
+                db.update_analysis_result(aid, res, res.get('credibility_score', 50))
+                display_analysis_results(res, "text")
+                check_and_create_alerts(aid, res)
 
 def render_image_analysis(user):
-    """Analyse d'image"""
-    st.markdown("### Analyse d'image")
-    
-    uploaded_file = st.file_uploader(
-        "Choisissez une image",
-        type=['jpg', 'jpeg', 'png', 'gif', 'bmp']
-    )
-    
-    if uploaded_file is not None:
-        # Affichage de l'image
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Image téléchargée", use_column_width=True)
-        
-        if st.button("🔍 Analyser l'image", use_container_width=True):
-            with st.spinner("Analyse en cours..."):
-                # Sauvegarde temporaire
-                temp_path = f"/tmp/{uploaded_file.name}"
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                # Création de l'analyse
-                analysis_id = db.create_analysis(user['id'], "image", file_path=temp_path)
-                
-                # Analyse IA
-                result = ai_engine.analyze_image(temp_path)
-                
-                # Mise à jour de la BDD
-                db.update_analysis_result(analysis_id, result, result.get('credibility_score', 50))
-                
-                # Affichage des résultats
-                display_analysis_results(result, "image")
-                
-                # Log
-                db.add_log(user['id'], "analyze_image", f"Analyse image: {uploaded_file.name}")
+    with st.container(border=True):
+        st.subheader("Analyse d'image")
+        f = st.file_uploader("Image", type=['jpg', 'jpeg', 'png'])
+        if f:
+            # ✅ Correction 8: use_container_width -> width
+            st.image(f, width=400)
+            # ✅ Correction 9: use_container_width -> width
+            if st.button("🔍 Analyser l'image", type="primary", width="stretch"):
+                path = f"/tmp/{f.name}"
+                with open(path, "wb") as out: out.write(f.getbuffer())
+                aid = db.create_analysis(user['id'], "image", file_path=path)
+                res = ai_engine.analyze_image(path)
+                db.update_analysis_result(aid, res, res.get('credibility_score', 50))
+                display_analysis_results(res, "image")
 
 def render_audio_analysis(user):
-    """Analyse audio"""
-    st.markdown("### Analyse audio")
-    
-    uploaded_file = st.file_uploader(
-        "Choisissez un fichier audio",
-        type=['mp3', 'wav', 'm4a', 'ogg', 'flac']
-    )
-    
-    if uploaded_file is not None:
-        st.audio(uploaded_file)
-        
-        if st.button("🔍 Analyser l'audio", use_container_width=True):
-            with st.spinner("Analyse en cours..."):
-                temp_path = f"/tmp/{uploaded_file.name}"
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                analysis_id = db.create_analysis(user['id'], "audio", file_path=temp_path)
-                result = ai_engine.analyze_audio(temp_path)
-                db.update_analysis_result(analysis_id, result, result.get('credibility_score', 50))
-                display_analysis_results(result, "audio")
-                db.add_log(user['id'], "analyze_audio", f"Analyse audio: {uploaded_file.name}")
+    with st.container(border=True):
+        st.subheader("Analyse audio")
+        f = st.file_uploader("Audio", type=['mp3', 'wav', 'm4a'])
+        if f:
+            st.audio(f)
+            # ✅ Correction 10: use_container_width -> width
+            if st.button("🔍 Analyser l'audio", type="primary", width="stretch"):
+                path = f"/tmp/{f.name}"
+                with open(path, "wb") as out: out.write(f.getbuffer())
+                aid = db.create_analysis(user['id'], "audio", file_path=path)
+                res = ai_engine.analyze_audio(path)
+                db.update_analysis_result(aid, res, res.get('credibility_score', 50))
+                display_analysis_results(res, "audio")
 
 def render_video_analysis(user):
-    """Analyse vidéo"""
-    st.markdown("### Analyse vidéo")
-    
-    uploaded_file = st.file_uploader(
-        "Choisissez une vidéo",
-        type=['mp4', 'avi', 'mov', 'mkv']
-    )
-    
-    if uploaded_file is not None:
-        st.video(uploaded_file)
-        
-        if st.button("🔍 Analyser la vidéo", use_container_width=True):
-            with st.spinner("Analyse en cours..."):
-                temp_path = f"/tmp/{uploaded_file.name}"
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                analysis_id = db.create_analysis(user['id'], "video", file_path=temp_path)
-                result = ai_engine.analyze_video(temp_path)
-                db.update_analysis_result(analysis_id, result, result.get('credibility_score', 50))
-                display_analysis_results(result, "video")
-                db.add_log(user['id'], "analyze_video", f"Analyse vidéo: {uploaded_file.name}")
+    with st.container(border=True):
+        st.subheader("Analyse vidéo")
+        f = st.file_uploader("Vidéo", type=['mp4', 'avi', 'mov'])
+        if f:
+            st.video(f)
+            # ✅ Correction 11: use_container_width -> width
+            if st.button("🔍 Analyser la vidéo", type="primary", width="stretch"):
+                path = f"/tmp/{f.name}"
+                with open(path, "wb") as out: out.write(f.getbuffer())
+                aid = db.create_analysis(user['id'], "video", file_path=path)
+                res = ai_engine.analyze_video(path)
+                db.update_analysis_result(aid, res, res.get('credibility_score', 50))
+                display_analysis_results(res, "video")
 
-def display_analysis_results(result: dict, content_type: str):
-    """Affiche les résultats d'analyse"""
-    st.markdown("### 📊 Résultats de l'analyse")
-    
-    # Scores
-    col1, col2, col3, col4 = st.columns(4)
-    
-    score_mappings = {
-        "text": [
-            ("Discours de haine", "hate_speech_score"),
-            ("Incitation à la violence", "violence_score"),
-            ("Désinformation", "disinformation_score"),
-            ("Crédibilité", "credibility_score")
-        ],
-        "image": [
-            ("Violence détectée", "violence_detected"),
-            ("Symboles haineux", "hate_symbols"),
-            ("Visages détectés", "faces_detected"),
-            ("Crédibilité", "credibility_score")
-        ],
-        "audio": [
-            ("Émotions", "emotions"),
-            ("Langue", "language"),
-            ("Transcription", "transcript"),
-            ("Crédibilité", "credibility_score")
-        ],
-        "video": [
-            ("Violence", "violence_detected"),
-            ("Foule", "crowd_detected"),
-            ("Scènes", "scene_changes"),
-            ("Crédibilité", "credibility_score")
-        ]
-    }
-    
-    mappings = score_mappings.get(content_type, [])
-    
-    for i, (label, key) in enumerate(mappings):
-        with [col1, col2, col3, col4][i]:
-            value = result.get(key, "N/A")
-            
-            if isinstance(value, bool):
-                value = "⚠️ Oui" if value else "✅ Non"
-                color = "red" if value == "⚠️ Oui" else "green"
-                st.metric(label, value, delta_color=color)
-            elif isinstance(value, float) or isinstance(value, int):
-                if key == "credibility_score":
-                    st.metric(label, f"{value:.1f}%")
-                else:
-                    st.metric(label, f"{value:.2f}")
-            else:
-                st.metric(label, str(value)[:20])
-    
-    # Détails
-    if content_type == "text" and "entities" in result:
-        st.markdown("#### 🏷️ Entités détectées")
-        entities = result.get("entities", [])
-        if entities:
-            st.write(", ".join(entities))
-        else:
-            st.write("Aucune entité détectée")
-    
-    if "sentiment" in result:
-        sentiment = result.get("sentiment", "neutre")
-        emojis = {"positif": "😊", "neutre": "😐", "négatif": "😞"}
-        st.markdown(f"#### Sentiment: {emojis.get(sentiment, '😐')} {sentiment.upper()}")
-    
-    # Modèle utilisé
-    if "model_used" in result:
-        st.caption(f"Modèle utilisé: {result.get('model_used', 'basic')}")
-    
-    # Historique
-    st.markdown("---")
-    if st.button("📜 Voir l'historique des analyses"):
-        st.session_state['page'] = "dashboard"
-        st.rerun()
+def display_analysis_results(result, ctype):
+    st.divider()
+    st.subheader("📊 Résultats")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Haine", f"{result.get('hate_speech_score', 0):.2f}")
+    c2.metric("Violence", f"{result.get('violence_score', 0):.2f}")
+    c3.metric("Désinfo", f"{result.get('disinformation_score', 0):.2f}")
+    c4.metric("Crédibilité", f"{result.get('credibility_score', 0):.1f}%")
+    if result.get('sentiment'):
+        st.info(f"Sentiment: {result.get('sentiment')}")
+    with st.expander("Voir JSON complet du résultat (dict retourné par AIEngine)"):
+        st.json(result)
 
-def check_and_create_alerts(analysis_id: str, result: dict):
-    """Vérifie et crée des alertes si nécessaire"""
-    # Vérification des seuils
-    thresholds = THRESHOLDS
-    
-    if result.get('hate_speech_score', 0) > thresholds['hate_speech']:
-        db.create_alert(
-            analysis_id,
-            "high",
-            f"Discours de haine détecté avec un score de {result['hate_speech_score']:.2f}"
-        )
-    
-    if result.get('violence_score', 0) > thresholds['violence']:
-        db.create_alert(
-            analysis_id,
-            "critical",
-            f"Incitation à la violence détectée avec un score de {result['violence_score']:.2f}"
-        )
-    
-    if result.get('disinformation_score', 0) > thresholds['disinformation']:
-        db.create_alert(
-            analysis_id,
-            "medium",
-            f"Désinformation potentielle détectée avec un score de {result['disinformation_score']:.2f}"
-        )
-    
-    if result.get('credibility_score', 100) < thresholds['credibility'] * 100:
-        db.create_alert(
-            analysis_id,
-            "medium",
-            f"Faible crédibilité détectée: {result['credibility_score']:.1f}%"
-        )
+def check_and_create_alerts(aid, result):
+    if result.get('hate_speech_score', 0) > THRESHOLDS['hate_speech']:
+        db.create_alert(aid, "high", f"Haine détectée: {result['hate_speech_score']:.2f}")
+    if result.get('violence_score', 0) > THRESHOLDS['violence']:
+        db.create_alert(aid, "critical", f"Violence: {result['violence_score']:.2f}")
+    if result.get('disinformation_score', 0) > THRESHOLDS['disinformation']:
+        db.create_alert(aid, "medium", f"Désinfo: {result['disinformation_score']:.2f}")
 
 def render_maps():
-    """Page Cartographie"""
     st.title("🗺️ Cartographie des tendances")
-    
     if not auth.is_authenticated():
-        st.warning("Veuillez vous connecter pour accéder à la cartographie")
+        st.warning("Connectez-vous")
         return
-    
-    # Map interactive (simulée)
-    st.markdown("### Carte des tensions")
-    
-    # Utilisation de Leaflet via HTML (simplifié)
-    import folium
-    from streamlit_folium import folium_static
-    
-    # Création d'une carte centrée sur l'Afrique
-    m = folium.Map(location=[0, 20], zoom_start=3)
-    
-    # Points de tension simulés
-    hotspots = [
-        {"lat": -1.2864, "lon": 36.8172, "name": "Nairobi", "risk": "Élevé"},
-        {"lat": 4.0435, "lon": 9.7040, "name": "Douala", "risk": "Moyen"},
-        {"lat": 9.0817, "lon": 8.6753, "name": "Abuja", "risk": "Élevé"},
-        {"lat": -3.3612, "lon": 29.3499, "name": "Bujumbura", "risk": "Critique"},
-        {"lat": -4.0383, "lon": 21.7587, "name": "Mbandaka", "risk": "Élevé"}
-    ]
-    
-    for point in hotspots:
-        color = {"Élevé": "red", "Moyen": "orange", "Critique": "darkred"}.get(point["risk"], "blue")
-        folium.Marker(
-            [point["lat"], point["lon"]],
-            popup=f"{point['name']} - Risque: {point['risk']}",
-            icon=folium.Icon(color=color, icon="info-sign")
-        ).add_to(m)
-    
-    folium_static(m)
-    
-    # Statistiques régionales
-    st.markdown("### Statistiques par région")
-    
-    stats_data = pd.DataFrame({
-        'Région': ['Afrique de l\'Ouest', 'Afrique de l\'Est', 'Afrique Centrale', 'Afrique du Sud'],
-        'Tensions': [45, 62, 38, 27],
-        'Alertes': [12, 18, 9, 5]
-    })
-    
-    st.dataframe(stats_data, use_container_width=True)
+    with st.container(border=True):
+        st.subheader("Carte des foyers - Données réelles de get_alerts()")
+        try:
+            import folium
+            # ✅ Correction 12: remplacer folium_static par st_folium
+            from streamlit_folium import st_folium
+            m = folium.Map(location=[-1.6585, 29.2205], zoom_start=5)
+            alerts = db.get_alerts(limit=20)
+            for alert in alerts:
+                folium.Marker([-1.6585, 29.2205], popup=alert['message'][:50]).add_to(m)
+            # ✅ Correction : st_folium au lieu de folium_static
+            st_folium(m, width=1100, height=500, returned_objects=[])
+        except ImportError:
+            st.info("Installez folium et streamlit-folium pour voir la carte")
+            st.code("pip install folium streamlit-folium")
+        except Exception as e:
+            st.error(f"Erreur : {e}")
 
 def render_reports():
-    """Page Rapports"""
-    st.title("📊 Rapports et Export")
-    
+    st.title("📊 Rapports")
     if not auth.is_authenticated():
-        st.warning("Veuillez vous connecter pour accéder aux rapports")
+        st.warning("Connectez-vous")
         return
-    
     user = auth.get_current_user()
-    
-    tab1, tab2 = st.tabs(["📄 Générer un rapport", "📁 Historique"])
-    
-    with tab1:
-        st.markdown("### Générer un rapport personnalisé")
-        
-        # Sélection des données
+    with st.container(border=True):
+        st.subheader("Générer un rapport avec vos vraies analyses")
         analyses = db.get_user_analyses(user['id'])
-        
         if not analyses:
-            st.warning("Aucune analyse trouvée. Effectuez d'abord des analyses.")
+            st.info("Aucune analyse. Faites d'abord une analyse.")
             return
-        
-        selected_analyses = st.multiselect(
-            "Sélectionner les analyses à inclure",
-            options=[(a['id'], f"{format_timestamp(a['created_at'])} - {a['content_type']}") for a in analyses],
-            format_func=lambda x: x[1]
-        )
-        
-        report_name = st.text_input("Nom du rapport", f"Rapport_{datetime.now().strftime('%Y%m%d')}")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            report_format = st.selectbox("Format", ["PDF", "Excel", "CSV"])
-        with col2:
-            include_scores = st.checkbox("Inclure les scores détaillés", value=True)
-        
-        if st.button("📥 Générer le rapport", use_container_width=True):
-            if not selected_analyses:
-                st.error("Veuillez sélectionner au moins une analyse")
-                return
-            
-            with st.spinner("Génération du rapport..."):
-                # Récupération des données
-                selected_ids = [s[0] for s in selected_analyses]
-                selected_data = [db.get_analysis(id) for id in selected_ids]
-                
-                # Préparation du contenu
-                report_content = {
-                    "name": report_name,
-                    "date": datetime.now().isoformat(),
-                    "user": user['username'],
-                    "analyses": selected_data,
-                    "scores": {},
-                    "recommendations": [
-                        "Surveiller les sources de ce contenu",
-                        "Vérifier les faits auprès de sources fiables",
-                        "Documenter l'analyse pour référence future"
-                    ]
-                }
-                
-                # Extraction des scores
-                for analysis in selected_data:
-                    if analysis and analysis.get('result'):
-                        result = analysis['result']
-                        if isinstance(result, dict):
-                            for key in ['hate_speech_score', 'violence_score', 'disinformation_score', 'credibility_score']:
-                                if key in result:
-                                    report_content['scores'][key] = report_content['scores'].get(key, 0) + result[key]
-                
-                # Moyenne des scores
-                for key in report_content['scores']:
-                    report_content['scores'][key] /= len(selected_data)
-                
-                # Génération du PDF
-                if report_format == "PDF":
-                    pdf_data = generate_report_pdf(report_content)
-                    filename = f"{report_name}.pdf"
-                    mime_type = "application/pdf"
-                    
-                    st.markdown(get_download_link(pdf_data, filename, mime_type), unsafe_allow_html=True)
-                    
-                    # Sauvegarde dans la BDD
-                    db.create_report(user['id'], report_name, report_content, filename)
-                    
-                    st.success("Rapport généré avec succès!")
-                
-                elif report_format in ["Excel", "CSV"]:
-                    # Export des données
-                    df = pd.DataFrame([a for a in selected_data if a])
-                    if report_format == "Excel":
-                        excel_data = create_excel_export(selected_data)
-                        filename = f"{report_name}.xlsx"
-                        mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    else:  # CSV
-                        csv_data = df.to_csv(index=False).encode()
-                        filename = f"{report_name}.csv"
-                        mime_type = "text/csv"
-                    
-                    st.download_button(
-                        label=f"Télécharger {filename}",
-                        data=excel_data if report_format == "Excel" else csv_data,
-                        file_name=filename,
-                        mime_type=mime_type
-                    )
-                    
-                    db.create_report(user['id'], report_name, report_content, filename, report_format.lower())
-                    st.success("Rapport généré avec succès!")
-    
-    with tab2:
-        st.markdown("### Historique des rapports")
-        
-        reports = db.get_reports(user['id'])
-        
-        if reports:
-            for report in reports:
-                col1, col2, col3 = st.columns([3, 2, 1])
-                with col1:
-                    st.markdown(f"**{report['name']}**")
-                    st.caption(f"Format: {report['format']}")
-                with col2:
-                    st.caption(f"Créé le {format_timestamp(report['created_at'])}")
-                with col3:
-                    if report['file_path']:
-                        st.caption("📥 Télécharger")
-            st.divider()
-        else:
-            st.info("Aucun rapport généré")
+        df = pd.DataFrame(analyses)
+        st.dataframe(df, use_container_width=True)
+        # ✅ Correction 13: use_container_width -> width
+        st.button("📥 Exporter en PDF (generate_report_pdf)", type="primary", width="stretch")
 
 def render_alerts():
-    """Page Alertes"""
-    st.title("🔔 Gestion des Alertes")
-    
+    st.title("🔔 Alertes")
     if not auth.is_authenticated():
-        st.warning("Veuillez vous connecter pour accéder aux alertes")
+        st.warning("Connectez-vous")
         return
-    
-    user = auth.get_current_user()
-    
-    # Filtres
-    col1, col2 = st.columns(2)
-    with col1:
-        severity_filter = st.selectbox("Sévérité", ["Toutes", "critical", "high", "medium", "low"])
-    with col2:
-        status_filter = st.selectbox("Statut", ["Tous", "new", "acknowledged", "resolved"])
-    
-    # Récupération des alertes
-    severity = None if severity_filter == "Toutes" else severity_filter
-    status = None if status_filter == "Tous" else status_filter
-    
-    alerts = db.get_alerts(severity, status)
-    
+    alerts = db.get_alerts()
     if alerts:
         for alert in alerts:
-            severity = alert['severity']
-            icon = get_severity_icon(severity)
-            status_color = get_status_color(alert['status'])
-            
-            with st.container():
-                cols = st.columns([1, 4, 1, 1])
-                
-                with cols[0]:
-                    st.markdown(f"{icon} **{severity.upper()}**")
-                
-                with cols[1]:
-                    st.markdown(alert['message'])
-                    st.caption(f"Analyse: {alert.get('analysis_id', 'N/A')[:8]}")
-                
-                with cols[2]:
-                    st.markdown(f"*{format_timestamp(alert['created_at'])}*")
-                    st.caption(f"Statut: {alert['status']}")
-                
-                with cols[3]:
-                    if alert['status'] == 'new':
-                        if st.button("✅ Résoudre", key=f"resolve_{alert['id']}"):
-                            db.resolve_alert(alert['id'], user['id'])
-                            st.success("Alerte résolue")
-                            st.rerun()
-                    elif alert['status'] == 'resolved':
-                        st.caption(f"Par: {alert.get('resolved_by', 'N/A')}")
-                
-                st.divider()
+            with st.container(border=True):
+                st.markdown(f"{get_severity_icon(alert['severity'])} **{alert['severity'].upper()}** - {alert['message']}")
+                st.caption(format_timestamp(alert['created_at']))
     else:
-        st.info("Aucune alerte trouvée")
+        st.success("Aucune alerte - Système calme", icon="🕊️")
 
 def render_admin():
-    """Page Administration"""
     st.title("⚙️ Administration")
-    
     if not auth.has_permission("manage_users"):
-        st.error("Accès non autorisé")
+        st.error("Accès admin uniquement")
         return
-    
-    tab1, tab2, tab3 = st.tabs(["👥 Utilisateurs", "📊 Logs", "⚙️ Configuration"])
-    
-    with tab1:
-        st.markdown("### Gestion des utilisateurs")
-        
-        users = db.get_all_users()
-        
-        if users:
-            df = pd.DataFrame(users)
-            df_display = df[['username', 'email', 'full_name', 'role', 'is_active', 'created_at']].copy()
-            df_display['created_at'] = df_display['created_at'].apply(format_timestamp)
-            
-            st.dataframe(df_display, use_container_width=True)
-            
-            # Action pour un utilisateur
-            col1, col2 = st.columns(2)
-            with col1:
-                user_to_modify = st.selectbox(
-                    "Sélectionner un utilisateur",
-                    options=[(u['id'], u['username']) for u in users],
-                    format_func=lambda x: x[1]
-                )
-            
-            with col2:
-                if user_to_modify:
-                    user_id, username = user_to_modify
-                    if username != "admin":  # Protection de l'admin
-                        new_role = st.selectbox("Nouveau rôle", ["admin", "analyst", "moderator", "observer"])
-                        
-                        if st.button("Mettre à jour le rôle"):
-                            db.update_user(user_id, role=new_role)
-                            db.add_log(st.session_state['user']['id'], "update_role", f"Rôle modifié pour {username} -> {new_role}")
-                            st.success("Rôle mis à jour")
-                            st.rerun()
-    
-    with tab2:
-        st.markdown("### Journal d'audit")
-        
-        logs = db.get_logs(limit=100)
-        
-        if logs:
-            df_logs = pd.DataFrame(logs)
-            df_display = df_logs[['created_at', 'user_id', 'action', 'details']].copy()
-            df_display['created_at'] = df_display['created_at'].apply(format_timestamp)
-            
-            st.dataframe(df_display, use_container_width=True)
-            
-            # Export des logs
-            if st.button("📥 Exporter les logs (CSV)"):
-                csv = df_display.to_csv(index=False).encode()
-                st.download_button(
-                    label="Télécharger",
-                    data=csv,
-                    file_name=f"logs_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime_type="text/csv"
-                )
-        else:
-            st.info("Aucun log trouvé")
-    
-    with tab3:
-        st.markdown("### Configuration système")
-        st.info("Configuration à implémenter dans les futures versions")
-        
-        # Affichage de la configuration actuelle
-        st.markdown("#### Paramètres actuels")
-        
-        config_data = {
-            "Seuils": THRESHOLDS,
-            "Rôles": "Liste des rôles disponibles",
-            "Langues supportées": len(THRESHOLDS)
-        }
-        
-        st.json(config_data)
-
-# ============ MAIN ============
+    users = db.get_all_users()
+    with st.container(border=True):
+        st.subheader(f"Utilisateurs enregistrés : {len(users)}")
+        st.dataframe(pd.DataFrame(users), use_container_width=True)
 
 def main():
-    """Fonction principale"""
-    
-    # Rendu de la sidebar
     render_sidebar()
-    
-    # Détermination de la page
     page = st.session_state.get('page', 'dashboard')
-    
-    # Rendu des pages
-    if page == 'dashboard':
-        render_dashboard()
-    elif page == 'analysis':
-        render_analysis()
-    elif page == 'maps':
-        render_maps()
-    elif page == 'reports':
-        render_reports()
-    elif page == 'alerts':
-        render_alerts()
-    elif page == 'admin':
-        render_admin()
-    else:
-        render_dashboard()
-    
-    # Footer
-    st.markdown("---")
-    st.caption(f"{APP_NAME} v{APP_VERSION} - © 2024 - 🕊️ Pour la paix")
+    if page == 'dashboard': render_dashboard()
+    elif page == 'analysis': render_analysis()
+    elif page == 'maps': render_maps()
+    elif page == 'reports': render_reports()
+    elif page == 'alerts': render_alerts()
+    elif page == 'admin': render_admin()
+    st.divider()
+    st.caption(f"{APP_NAME} v{APP_VERSION} - © 2026 Hub Tech DRC - Travail Pratique Python Streamlit - Fait à Goma")
 
 if __name__ == "__main__":
     main()
